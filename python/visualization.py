@@ -120,6 +120,7 @@ def visualize_scroll(y):
     p[0, 0] = r
     p[1, 0] = g
     p[2, 0] = b
+
     # Update the LED strip
     return np.concatenate((p[:, ::-1], p), axis=1)
 
@@ -227,11 +228,16 @@ def microphone_update(audio_samples):
         if config.USE_GUI:
             # Plot filterbank output
             x = np.linspace(config.MIN_FREQUENCY, config.MAX_FREQUENCY, len(mel))
+
             mel_curve.setData(x=x, y=fft_plot_filter.update(mel))
             # Plot the color channels
             r_curve.setData(y=led.pixels[0])
             g_curve.setData(y=led.pixels[1])
             b_curve.setData(y=led.pixels[2])
+
+            update_led_plot()
+
+
     if config.USE_GUI:
         app.processEvents()
     
@@ -250,6 +256,28 @@ y_roll = np.random.rand(config.N_ROLLING_HISTORY, samples_per_frame) / 1e16
 
 visualization_effect = visualize_spectrum
 """Visualization effect to display on the LED strip"""
+
+def update_led_plot():
+  # Update our pseudo-spotlights
+
+  spots = []
+
+  pen = pg.mkPen((0, 0, 255))
+  brush = pg.mkBrush((0,0,255))
+
+  # First ring: 6 spotlights evenly spaced around the origin.
+  # TODO: calculate a color pen/brush to use based on LED settings
+  for n in range(6):
+    theta = (np.pi/3) * n + (np.pi/6)
+    spots.append({
+      "x": np.cos(theta),
+      "y": np.sin(theta),
+      "pen": pen,
+      "brush": brush
+    })
+
+  led_items.clear()
+  led_items.addPoints(spots)
 
 
 if __name__ == '__main__':
@@ -341,6 +369,7 @@ if __name__ == '__main__':
         scroll_label.mousePressEvent = scroll_click
         spectrum_label.mousePressEvent = spectrum_click
         energy_click(0)
+
         # Layout
         layout.nextRow()
         layout.addItem(freq_label, colspan=3)
@@ -350,6 +379,18 @@ if __name__ == '__main__':
         layout.addItem(energy_label)
         layout.addItem(scroll_label)
         layout.addItem(spectrum_label)
+
+        layout.nextRow()
+
+        led_plot = layout.addPlot(title='Jank', colspan=3, rowspan=2)
+        led_plot.disableAutoRange()
+        led_plot.setRange(yRange=[-6,6])
+        led_plot.setAspectLocked()
+
+        led_items = pg.ScatterPlotItem()
+        led_plot.addItem(led_items)
+
+
     # Initialize LEDs
     led.update()
     # Start listening to live audio stream
