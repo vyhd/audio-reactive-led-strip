@@ -200,7 +200,6 @@ def microphone_update(audio_samples):
     
     vol = np.max(np.abs(y_data))
     if vol < config.MIN_VOLUME_THRESHOLD:
-        print('No audio input. Volume below threshold. Volume:', vol)
         led.pixels = np.tile(0, (3, config.N_PIXELS))
         led.update()
     else:
@@ -229,16 +228,15 @@ def microphone_update(audio_samples):
             # Plot filterbank output
             x = np.linspace(config.MIN_FREQUENCY, config.MAX_FREQUENCY, len(mel))
 
-            mel_curve.setData(x=x, y=fft_plot_filter.update(mel))
+#            mel_curve.setData(x=x, y=fft_plot_filter.update(mel))
             # Plot the color channels
             r_curve.setData(y=led.pixels[0])
             g_curve.setData(y=led.pixels[1])
             b_curve.setData(y=led.pixels[2])
 
-            update_led_plot()
-
 
     if config.USE_GUI:
+        update_led_sims()
         app.processEvents()
     
     if config.DISPLAY_FPS:
@@ -257,27 +255,78 @@ y_roll = np.random.rand(config.N_ROLLING_HISTORY, samples_per_frame) / 1e16
 visualization_effect = visualize_spectrum
 """Visualization effect to display on the LED strip"""
 
-def update_led_plot():
-  # Update our pseudo-spotlights
+def build_led_string():
+  spots = []
+
+  # Update the string. This case is simple:
+  for n in range(config.N_PIXELS):
+    color = (
+      led.pixels[0][n],
+      led.pixels[1][n],
+      led.pixels[2][n]
+    )
+    spots.append({
+      "x": n,
+      "y": 0,
+      "pen": pg.mkPen(color),
+      "brush": pg.mkBrush(color)
+    })
+
+  return spots
+
+
+# radius: number, color_index: number
+# (distance from origin, index into the LED pixel array)
+def build_led_ring(radius, num_lights, color_index):
+  radius_offset = 0
+  if (radius % 2 == 0):
+    radius_offset = (np.pi/(num_lights))
 
   spots = []
 
-  pen = pg.mkPen((0, 0, 255))
-  brush = pg.mkBrush((0,0,255))
+  color = (
+    led.pixels[0][color_index],
+    led.pixels[1][color_index],
+    led.pixels[2][color_index]
+  )
 
-  # First ring: 6 spotlights evenly spaced around the origin.
-  # TODO: calculate a color pen/brush to use based on LED settings
-  for n in range(6):
-    theta = (np.pi/3) * n + (np.pi/6)
+  pen = pg.mkPen(color)
+  brush = pg.mkBrush(color)
+
+  for n in range(num_lights):
+    theta = (np.pi/(num_lights/2)) * n + radius_offset
     spots.append({
-      "x": np.cos(theta),
-      "y": np.sin(theta),
+      "x": radius * np.cos(theta),
+      "y": radius * np.sin(theta),
       "pen": pen,
       "brush": brush
     })
 
-  led_items.clear()
-  led_items.addPoints(spots)
+  return spots
+
+def update_led_sims():
+  string_points = build_led_string()
+
+  #
+  # Update the spotlight based on the centre of the pixel grid, fading outwards
+  #
+  led_index = (config.N_PIXELS // 2)
+  index_delta = 2
+
+  ring_points = [
+    build_led_ring(radius=0, num_lights=1, color_index=(led_index)),
+    build_led_ring(radius=1, num_lights=6, color_index=(led_index)),
+    build_led_ring(radius=2, num_lights=8, color_index=(led_index-(index_delta*1))),
+    build_led_ring(radius=3, num_lights=12, color_index=(led_index-(index_delta*2))),
+    build_led_ring(radius=4, num_lights=16, color_index=(led_index-(index_delta*3))),
+    build_led_ring(radius=5, num_lights=20, color_index=(led_index-(index_delta*4)))
+  ]
+
+  led_bulb_items.clear()
+  led_bulb_items.addPoints([y for x in ring_points for y in x])
+
+  led_string_items.clear()
+  led_string_items.addPoints(string_points)
 
 
 if __name__ == '__main__':
@@ -292,14 +341,16 @@ if __name__ == '__main__':
         view.show()
         view.setWindowTitle('Visualization')
         view.resize(800,600)
+
         # Mel filterbank plot
-        fft_plot = layout.addPlot(title='Filterbank Output', colspan=3)
-        fft_plot.setRange(yRange=[-0.1, 1.2])
-        fft_plot.disableAutoRange(axis=pg.ViewBox.YAxis)
-        x_data = np.array(range(1, config.N_FFT_BINS + 1))
-        mel_curve = pg.PlotCurveItem()
-        mel_curve.setData(x=x_data, y=x_data*0)
-        fft_plot.addItem(mel_curve)
+#        fft_plot = layout.addPlot(title='Filterbank Output', colspan=3)
+#        fft_plot.setRange(yRange=[-0.1, 1.2])
+#        fft_plot.disableAutoRange(axis=pg.ViewBox.YAxis)
+#        x_data = np.array(range(1, config.N_FFT_BINS + 1))
+#        mel_curve = pg.PlotCurveItem()
+#        mel_curve.setData(x=x_data, y=x_data*0)
+#        fft_plot.addItem(mel_curve)
+
         # Visualization plot
         layout.nextRow()
         led_plot = layout.addPlot(title='Visualization Output', colspan=3)
@@ -380,15 +431,36 @@ if __name__ == '__main__':
         layout.addItem(scroll_label)
         layout.addItem(spectrum_label)
 
+        #
+        # Bulb sim
+        #
         layout.nextRow()
 
-        led_plot = layout.addPlot(title='Jank', colspan=3, rowspan=2)
-        led_plot.disableAutoRange()
-        led_plot.setRange(yRange=[-6,6])
-        led_plot.setAspectLocked()
+        bulb_plot = layout.addPlot(title='LED bulb sim', colspan=3)
+        bulb_plot.disableAutoRange()
+        bulb_plot.setRange(yRange=[-8,8])
+        bulb_plot.setAspectLocked()
 
-        led_items = pg.ScatterPlotItem()
-        led_plot.addItem(led_items)
+        # Set a circle drawn from the origin (-6, -6 upwards to 6, 6)
+        r = 6
+        circle = pg.QtGui.QGraphicsEllipseItem(-r, -r, r * 2, r * 2)
+        circle.setPen(pg.mkPen((255,255,255)))
+        bulb_plot.addItem(circle)
+
+        led_bulb_items = pg.ScatterPlotItem()
+        bulb_plot.addItem(led_bulb_items)
+
+        #
+        # String sim
+        #
+        layout.nextRow()
+
+        string_plot = layout.addPlot(title='LED string sim', colspan=3)
+        string_plot.disableAutoRange()
+        string_plot.setRange(xRange=[0, config.N_PIXELS], yRange=[-1, 1])
+
+        led_string_items = pg.ScatterPlotItem(size=16)
+        string_plot.addItem(led_string_items)
 
 
     # Initialize LEDs
