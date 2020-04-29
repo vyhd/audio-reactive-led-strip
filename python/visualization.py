@@ -11,6 +11,9 @@ import led
 _time_prev = time.time() * 1000.0
 """The previous time that the frames_per_second() function was called"""
 
+_frame_delta = 0
+"""The time between the last frame and the most recent frame"""
+
 _fps = dsp.ExpFilter(val=config.FPS, alpha_decay=0.2, alpha_rise=0.2)
 """The low-pass filter used to estimate frames-per-second"""
 
@@ -32,13 +35,13 @@ def frames_per_second():
         Estimated frames-per-second. This value is low-pass filtered
         to reduce noise.
     """
-    global _time_prev, _fps
+    global _time_prev, _frame_delta, _fps
     time_now = time.time() * 1000.0
-    dt = time_now - _time_prev
+    _frame_delta = time_now - _time_prev
     _time_prev = time_now
-    if dt == 0.0:
+    if _frame_delta == 0.0:
         return _fps.value
-    return _fps.update(1000.0 / dt)
+    return _fps.update(1000.0 / _frame_delta)
 
 
 def memoize(function):
@@ -200,7 +203,16 @@ def microphone_update(audio_samples):
     
     vol = np.max(np.abs(y_data))
     if vol < config.MIN_VOLUME_THRESHOLD:
-        led.pixels = np.tile(0, (3, config.N_PIXELS))
+        # fade out gracefully, over a second or so
+        amount_to_dim = 1 - (_frame_delta/1000)
+
+        for i in range(3):
+          led.pixels[i] = np.array(led.pixels[i]) * amount_to_dim
+
+        r_curve.setData(y=led.pixels[0])
+        g_curve.setData(y=led.pixels[1])
+        b_curve.setData(y=led.pixels[2])
+
         led.update()
     else:
         # Transform audio input into the frequency domain
